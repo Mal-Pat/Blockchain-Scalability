@@ -1,4 +1,7 @@
-'''
+import numpy as np
+import matplotlib.pyplot as plt
+
+
 d = {}
 print(d)
 
@@ -14,8 +17,10 @@ print(d)
 d[2] = {}
 d[2][0] = 9
 print(d)
-'''
 
+print(max(list(d)))
+
+'''
 l = [1,2,3,4]
 
 for _ in range(len(l)):
@@ -24,3 +29,15 @@ for _ in range(len(l)):
     l.append(5)
 
 print(l)
+'''
+'''
+data = []
+for i in range(100):
+    a = 5000*np.random.beta(10,2.5)
+    print(f"a = {a}")
+    print(f"a' = {round(a)}")
+    data.append(round(a))
+
+plt.hist(data, 100)
+plt.show()
+'''
