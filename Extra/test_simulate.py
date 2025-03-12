@@ -12,7 +12,7 @@ class PoW:
         self.total_time = total_time
         self.newest_block_id = 0
         self.signals = {}
-        self.changed_node_blockchains = []
+        self.changed_blockchain_nodes = []
         self.avg_mine_time = avg_mine_time
         self.max_n_transactions = max_n_transactions
         self.bandwidth_std = bandwidth_std
@@ -38,50 +38,46 @@ class PoW:
             # Add block_id in "arrival_time" at correct neighbor "nb"
             self.signals[arrival_time][nb].append(block_id)
 
-    def checkMiningStatus(self, node):
-        if self.time == self.ntwk.nodes[node]["mining"]["mine_time"] and self.ntwk.nodes[node]["active"] == True:
-            return True
-        else:
-            return False
+    def nodeActivity(self):
+        pass
 
     # Adds the new block to both global and node's local blockchain and updates both global and node's local levels
     def addNewBlock(self, node):
+        # Level to add newly mined block = Level of block that node was mining on + 1
         level = self.global_blockchain[self.ntwk.nodes[node]["mining"]["block_id"]]["level"] + 1
         # or, level = max(list(self.ntwk.nodes[node]["local_levels"])) + 1
 
-        # Number of transactions in this block
-        n_transactions = self.numTransactions()
+        # Defines new_block
+        new_block = {"level": level, "prev_block": self.ntwk.nodes[node]["mining"]["block_id"], "miner": node, "time_created": self.time, "n_transactions": self.numTransactions()}
 
-        # Define new_block
-        new_block = {"level": level, "prev_block": self.ntwk.nodes[node]["mining"]["block_id"], "miner": node, "time_created": self.time, "n_transactions": n_transactions}
-
-        # Updating global_blockchain
+        # Updates global_blockchain
         self.global_blockchain[self.newest_block_id] = new_block
         
-        # Updating global_levels
+        # Updates global_levels
         if not (level in self.global_levels):
             self.global_levels[level] = []
         self.global_levels[level].append(self.newest_block_id)
 
-        # Updating local_blockchain
+        # Updates local_blockchain
         self.ntwk.nodes[node]["local_blockchain"][self.newest_block_id] = new_block
 
-        # Updating local_levels (note that the condition must always be true, but I still added the "if" condition just in case)
+        # Updates local_levels (note that the condition must always be true, but I still added the "if" condition just in case)
         if not (level in self.ntwk.nodes[node]["local_levels"]):
             self.ntwk.nodes[node]["local_levels"][level] = []
         self.ntwk.nodes[node]["local_levels"][level].append(self.newest_block_id)
 
-        # Adding node to changed_node_blockchains
-        self.changed_node_blockchains.append(node)
+        # Adds node to changed_blockchain_nodes
+        self.changed_blockchain_nodes.append(node)
 
+    # BIG ERROR - TWO block_id VARIABLES IN THIS
     def verifyAddingBlockToNode(self, node, level, block_id) -> bool:
-        prev_block_id = self.global_blockchain[block_id]["prev_block"]
-        if (level - 1) in self.ntwk.nodes[node]["local_levels"]: 
+        if (level - 1) in self.ntwk.nodes[node]["local_levels"]:
             for block_id in self.ntwk.nodes[node]["local_levels"][level - 1]:
-                if block_id == prev_block_id:
+                if block_id == self.global_blockchain[block_id]["prev_block"]:
                     return True
         return False
 
+    # CHANGE LOCAL BLOCKCHAIN TO ONLY HAVE BLOCK ID AND TIME IT RECEIVED IT
     def addBlockToLocalBlockchainFromSignal(self, node, block_id):
         level = self.global_blockchain[block_id]["level"]
 
@@ -92,9 +88,10 @@ class PoW:
                 self.ntwk.nodes[node]["local_levels"][level] = []
             self.ntwk.nodes[node]["local_levels"][level].append(block_id)
             
-            self.changed_node_blockchains.append(node)
+            # Adds node to changed_blockchain_nodes
+            self.changed_blockchain_nodes.append(node)
 
-        else: # Add block_id to storage with correct level key
+        else: # Adds block_id to storage with correct level key
             if not (level in self.ntwk.nodes[node]["storage"]):
                 self.ntwk.nodes[node]["storage"][level] = []
             self.ntwk.nodes[node]["storage"][level].append(block_id)
@@ -107,29 +104,43 @@ class PoW:
                 self.ntwk.nodes[node]["local_levels"][level] = []
             self.ntwk.nodes[node]["local_levels"][level].append(block_id)
             
-            self.changed_node_blockchains.append(node)
+            # Adds node to changed_blockchain_nodes
+            self.changed_blockchain_nodes.append(node)
 
             self.ntwk.nodes[node]["storage"][level].remove(block_id)
             
     # Handles mining
     def allMining(self):
         for node in self.ntwk.nodes():
-            if self.checkMiningStatus(node):
+            # Checks mining status of "node" and if it is active
+            if self.time == self.ntwk.nodes[node]["mining"]["mine_time"] and self.ntwk.nodes[node]["active"]:
+                # Increase newest block id by 1
                 self.newest_block_id += 1
+                # Add new block to global and local blockchains
                 self.addNewBlock(node)
-                self.sendSignal(node, self.newest_block_id) # By default sends the newest_block_id to all neighbors of node
+                # Send signal to all neighbors
+                self.sendSignal(node, self.newest_block_id)
 
     def handleSignals(self):
+        # If there exist signals supposed to arrive at current time
         if self.time in self.signals:
+            # For all nodes supposed to receive those signals
             for node in self.signals[self.time]:
+                # Add all blocks that the particular node was supposed to receive to the node local blockchain
                 for block_id in self.signals[self.time][node]:
                     self.addBlockToLocalBlockchainFromSignal(node, block_id)
+            # Free up memory by deleting the current time signals list
+            del self.signals[self.time]
 
     def checkNodeStorage(self, node):
         for level in self.ntwk.nodes[node]["storage"]:
             for block_id in self.ntwk.nodes[node]["storage"][level]:
                 self.tryAddBlockToLocalBlockchainFromStorage(node, level, block_id)
 
+    def getTotalActivePower(self):
+        return sum(self.ntwk.nodes[node]["power"] for node in self.ntwk.nodes() if self.ntwk.nodes[node]["active"])
+
+    # CHANGE THE POWER AS NODES CAN BE ACTIVE OR INACTIVE
     def checkNodeRestart(self, node):
         highest_level = max(list(self.ntwk.nodes[node]["local_levels"]))
         longest_chain_block_id = self.ntwk.nodes[node]["local_levels"][highest_level][0]
@@ -137,11 +148,15 @@ class PoW:
         # If the block it is mining on isn't longest_chain_block_id, then restart mining on this new block
         if self.ntwk.nodes[node]["mining"]["block_id"] != longest_chain_block_id:
             self.ntwk.nodes[node]["mining"]["block_id"] = longest_chain_block_id
-            self.ntwk.nodes[node]["mining"]["mine_time"] = self.time + round(np.random.exponential(self.avg_mine_time/self.ntwk.nodes[node]["power"]))
+            self.ntwk.nodes[node]["mining"]["mine_time"] = self.time + round(np.random.exponential(self.avg_mine_time * getTotalActivePower()/self.ntwk.nodes[node]["power"]))
+    
+    # Restarts 
+    def restartNode(self, node):
+        pass
 
     def checkNodes(self):
-        for _ in range(len(self.changed_node_blockchains)):
-            node = self.changed_node_blockchains.pop(0)
+        for _ in range(len(self.changed_blockchain_nodes)):
+            node = self.changed_blockchain_nodes.pop(0)
             self.checkNodeStorage(node)
             self.checkNodeRestart(node)
 
@@ -164,36 +179,48 @@ class PoW:
         
         return longest_chain
 
-    def topPowersSquaredSum(self, p):
-        power_values = [self.ntwk.nodes[node]["power"] for node in self.ntwk.nodes()]
+    def topActivePowersSquaredSum(self, p):
+        power_values = [self.ntwk.nodes[node]["power"] for node in self.ntwk.nodes() if self.ntwk.nodes[node]["active"]]
         power_values.sort(reverse=True)
         return sum(power**2 for power in power_values[:int(len(power_values)*p/100)])
-    
-    # Check the consensus on blockchain - till when do they all agree and by how much?
-    def measureConsensus(self):
+
+    def measureHHI(self):
+        return self.topActivePowersSquaredSum(10)
+
+    def measureNaka(self):
+        pass
+
+    def measureEntropy(self):
+        pass
+
+    def measureGini(self):
         pass
 
     def measureDecentralization(self):
-        pass
+        HHI = self.topActivePowersSquaredSum(10)
 
-    def measureScalability(self):
+    def measureTPS(self):
         # Measure TPS
-        TPS = sum(self.global_blockchain[block_id]["n_transactions"] for block_id in self.getLongestChain())/self.time
+        return sum(self.global_blockchain[block_id]["n_transactions"] for block_id in self.getLongestChain())/self.time
 
-        # Simply put:
+        # The above single line of code is equivalent to the three lines below:
         #   longest_chain = self.getLongestChain()
         #   total_confirmed_transactions = sum(self.global_blockchain[block_id]["n_transactions"] for block_id in longest_chain)
         #   TPS = total_confirmed_transactions/self.time
 
+    # Check the consensus on blockchain - till when do they all agree and by how much?
+    def measureConsensus(self):
+        pass
 
 
-class Network:
+
+class generateNetwork:
 
     def __init__(self, n):
         self.n = n
 
     def createGraph(self):
-        pass
+        self.graph = nx.Graph()
 
     def assignPower(self):
         pass
@@ -203,33 +230,6 @@ class Network:
 
     def createNetwork(self):
         pass
-
-
-
-class Measure:
-
-    def __init__(self, ntwk, total_time, global_blockchain, global_levels, max_n_transactions):
-        self.ntwk = ntwk
-        self.total_time = total_time
-        self.global_blockchain = global_blockchain
-        self.global_levels = global_levels
-        self.max_n_transactions = max_n_transactions
-
-    def topPowersSquaredSum(self, p):
-        power_values = [self.ntwk.nodes[node]["power"] for node in self.ntwk.nodes()]
-        power_values.sort(reverse=True)
-        return sum(power**2 for power in power_values[:int(len(power_values)*p/100)])
-
-    def measureDecentralization(self):
-        HHI = self.topPowersSquaredSum(10)
-        pass
-
-    def measureSecurity(self):
-        pass
-
-    def measureScalability(self):
-        # INCORRECT
-        TPS = len(self.global_levels)*self.max_n_transactions/self.total_time
 
 
 
@@ -269,14 +269,18 @@ G.nodes[1]["storage"] = {}
 G.nodes[2]["storage"] = {}
 G.nodes[3]["storage"] = {}
 
-G.nodes[1]["active"] = True
+G.nodes[1]["active"] = False
 G.nodes[2]["active"] = True
 G.nodes[3]["active"] = True
 
-print(G.nodes.data())
+# print(G.nodes.data())
 
 simulation = PoW(G, 1000, avg_mine_time, max_n_transactions, bandwidth_std)
+print(simulation.getTotalPower())
+
+'''
 simulation.oneTimeStep()
 print(simulation.global_blockchain)
 print(simulation.newest_block_id)
 print(simulation.time)
+'''
